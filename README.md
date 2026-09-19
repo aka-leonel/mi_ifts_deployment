@@ -10,6 +10,9 @@ etapa_1_infraestructura_cloud.sh
 etapa_2_backend.sh  
 etapa_3._frontendsh
 
+-- IMPORTANTE: para liberar recursos y no consumir tus créditos ejecutar al finalizar:
+etapa_4_cleanup.sh
+
 Si hay errores, seguir el paso a paso de deployment-guide.md
 
 ### Un poco de detalle.
@@ -20,3 +23,10 @@ Copia el contenido en tu CloudShell. Lo que hace es conectarse automáticamente 
 
 etapa_3_frontend.sh
 Crea este archivo en CloudShell. Se encarga de clonar el repositorio del frontend, configurar la variable de entorno apuntando a la IP pública de tu backend, compilar con Node.js y publicar todo en un bucket de Amazon S3 con acceso público web.
+
+etapa_4_cleanup.sh
+Como creamos recursos en orden inverso (primero los que dependen de otros), el script se encargará de eliminar:
+a. El bucket de S3 del frontend.
+b. La instancia EC2.
+c. El Security Group.
+d. La tabla de ruteo, subred, Internet Gateway y la VPC.
