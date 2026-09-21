@@ -1,6 +1,8 @@
 ## Esto es una guía rápida.
 Para una guía paso a paso -o si tenés errores- leer: deployment-guide.md
 
+
+
 ## Pasos
 
 1. Iniciar el laboratiorio de AWS, esperar que la luz se ponga verde e ir a la consola de CloudShell.
@@ -30,3 +32,16 @@ a. El bucket de S3 del frontend.
 b. La instancia EC2.
 c. El Security Group.
 d. La tabla de ruteo, subred, Internet Gateway y la VPC.
+
+
+### Configuración previa (Variables de Entorno)
+Para que los scripts de las distintas etapas se comuniquen entre sí (especialmente la EC2 y la IP pública), el sistema utiliza un archivo de configuración llamado `miifts-ids.sh`.
+NOTA: Si ejecutas la Etapa 1 (etapa_1_infraestructura_cloud.sh), este archivo se generará y completará automáticamente de forma dinámica en tu CloudShell.
+
+1. Copia la plantilla provista en el repositorio:
+   ```bash
+   cp miifts-ids.template.sh miifts-ids.sh
+
+   
+
+Si prefieres desplegar manualmente o recuperar una sesión previa, abre el archivo miifts-ids.sh y completa los datos de tu infraestructura de AWS (VPC_ID, INSTANCE_ID, PUBLIC_IP, etc.).
