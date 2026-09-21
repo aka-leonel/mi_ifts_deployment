@@ -1,6 +1,5 @@
 ## Esto es una guía rápida.
-Para una guía paso a paso -o si tenés errores- leer: deployment-guide.md
-
+Para una guía paso a paso. Si tenés error en alguna etapa, corregilo antes de pasar a la siguiente.
 
 
 ## Pasos
