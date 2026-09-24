@@ -37,6 +37,7 @@ Región usada: `us-east-1`.
 
 *(Nota: La base de datos PostgreSQL ya no vive dentro de Docker en la EC2, sino de forma desacoplada en un servicio administrado Amazon RDS).*
 
+![Arquitectura de miIFTS](./img/arquitectura-miifts.png)
 
 ## Detalle de cada etapa
 
