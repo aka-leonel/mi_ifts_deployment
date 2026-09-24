@@ -33,6 +33,11 @@ Región usada: `us-east-1`.
 > bash etapa_4_cleanup.sh
 > ```
 
+## Arquitectura final desplegada
+
+![Arquitectura de miIFTS](./img/arquitectura-miifts.png)
+
+
 ## Detalle de cada etapa
 
 ### etapa_1_infraestructura_cloud.sh
