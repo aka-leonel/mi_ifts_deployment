@@ -9,7 +9,7 @@ TAG="miifts"
 
 echo "=== 1. ELIMINANDO INSTANCIA RDS ==="
 DB_INSTANCE_IDENTIFIER="$TAG-db"
-if aws rds describe-db-instances --db-instance-identifier "$DB_INSTANCE_IDENTIFIER" 2>/dev/null \vert{} grep -q "$DB_INSTANCE_IDENTIFIER"; then
+if aws rds describe-db-instances --db-instance-identifier "$DB_INSTANCE_IDENTIFIER" > /dev/null 2>&1; then
   echo "Eliminando instancia RDS $DB_INSTANCE_IDENTIFIER (esto puede tardar unos minutos)..."
   aws rds delete-db-instance --db-instance-identifier "$DB_INSTANCE_IDENTIFIER" --skip-final-snapshot --delete-automated-backups > /dev/null
   aws rds wait db-instance-deleted --db-instance-identifier "$DB_INSTANCE_IDENTIFIER"
@@ -18,7 +18,7 @@ fi
 
 echo "=== 2. ELIMINANDO DB SUBNET GROUP (PRIMERO PARA LIBERAR RED) ==="
 DB_SG_NAME="$TAG-db-subnet-group"
-if aws rds describe-db-subnet-groups --db-subnet-group-name "$DB_SG_NAME" 2>/dev/null \vert{} grep -q "$DB_SG_NAME"; then
+if aws rds describe-db-subnet-groups --db-subnet-group-name "$DB_SG_NAME" > /dev/null 2>&1; then
   echo "Esperando a que AWS libere el DB Subnet Group..."
   for i in {1..20}; do
     aws rds delete-db-subnet-group --db-subnet-group-name "$DB_SG_NAME" 2>/dev/null && echo "DB Subnet Group eliminado." && break

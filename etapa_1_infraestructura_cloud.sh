@@ -135,7 +135,12 @@ aws rds wait db-instance-available --db-instance-identifier $DB_INSTANCE_IDENTIF
 # Obtener el Endpoint de la Base de Datos
 DB_HOST=$(aws rds describe-db-instances \
  --db-instance-identifier $DB_INSTANCE_IDENTIFIER \
- --query 'DbInstances[0].Endpoint.Address' --output text)
+ --query 'DBInstances[0].Endpoint.Address' --output text)
+
+if [ -z "$DB_HOST" ] || [ "$DB_HOST" = "None" ]; then
+  echo "❌ No se pudo obtener el endpoint de RDS."
+  exit 1
+fi
 save DB_HOST
 
 trap - ERR
