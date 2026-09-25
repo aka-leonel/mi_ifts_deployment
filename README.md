@@ -15,19 +15,30 @@ Región usada: `us-east-1`.
 ## Pasos
 
 1. Abrí CloudShell desde la consola de AWS.
+
 2. Traé los scripts a CloudShell clonando la rama correspondiente (`db_rds`) de este repositorio, o subiendo los archivos con *Actions → Upload file*:
    ```bash
    git clone -b db_rds https://github.com/aka-leonel/mi_ifts_deployment.git
    cd mi_ifts_deployment
    ```
-3. Ejecutá las etapas **en orden y de a una**, esperando que cada una termine antes de lanzar la siguiente (tené en cuenta que la creación de Amazon RDS en la etapa 1 puede tardar varios minutos):
-   ```bash
-   bash etapa_1_infraestructura_cloud.sh
-   bash etapa_2_backend.sh
-   bash etapa_3_frontend.sh
-   ```
-4. Al terminar, la etapa 3 imprime la URL de la PWA. La API queda en `http://<IP-pública>:8000` (la documentación en `/docs`).
 
+3.  Le vas a dar permiso de ejecución (chmod +x) a cada script ejecutando:
+   ```bash
+   bash chmod +x etapa_1_infraestructura_cloud.sh
+   bash chmod +x etapa_2_backend.sh
+   bash chmod +x etapa_3_frontend.sh   
+   ```
+
+4. Ejecutá las etapas **en orden y de a una**, esperando que cada una termine antes de lanzar la siguiente (tené en cuenta que la creación de Amazon RDS en la etapa 1 puede tardar varios minutos):
+   ```bash
+   bash ./etapa_1_infraestructura_cloud.sh
+   bash ./etapa_2_backend.sh
+   bash ./etapa_3_frontend.sh
+   ```
+
+5. Al terminar, la etapa 3 imprime la URL de la PWA. La API queda en `http://<IP-pública>:8000` (la documentación en `/docs`).
+
+6. Liberar recursos
 > **IMPORTANTE:** para liberar recursos y no consumir tus créditos, ejecutá al finalizar:
 > ```bash
 > bash etapa_4_cleanup.sh
@@ -75,7 +86,10 @@ Elimina todos los recursos de miIFTS **buscándolos por tag/nombre o identificad
 
 Al final verifica que no quede nada y borra `~/miifts-ids.sh`. Si quedó algún recurso, termina con error: se puede volver a ejecutar sin problema.
 
-## El archivo `~/miifts-ids.sh`
+### El archivo check_orphans.sh
+Este archivo es un auxiliar sirve para listar todos los servicios que estan levantados específicamente en la region us-east-1. En caso que cleanup falle en limpiar todos los recursos (sobre todo VPCs e IGWs) este script puede dar una pista.
+
+### El archivo `~/miifts-ids.sh`
 
 Las etapas se comunican mediante `~/miifts-ids.sh` (en el home de CloudShell), que guarda variables clave como `VPC_ID`, `INSTANCE_ID`, `PUBLIC_IP`, `DB_HOST` y `BUCKET_NAME`.
 
