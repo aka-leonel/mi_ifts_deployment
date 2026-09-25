@@ -120,7 +120,7 @@ aws rds create-db-instance \
  --db-instance-identifier $DB_INSTANCE_IDENTIFIER \
  --db-instance-class db.t3.micro \
  --engine postgres \
- --engine-version 16.1 \
+ --engine-version 16 \
  --master-username postgres \
  --master-user-password postgrespassword \
  --allocated-storage 20 \
