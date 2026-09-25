@@ -1,3 +1,4 @@
+### Esta rama incluye los scr ipts etapa_5_pausar y etapa_6_reanudar que permiten pausar/reanudar los servicios de AWS sin matar la base de datos. Si terminaste de trabajar y queres que se BORRE TODO ejecutá etapa_4_cleanup.
 # Despliegue de miIFTS en AWS Academy (Learner Lab) - Arquitectura con RDS
 
 Guía rápida para desplegar miIFTS (**backend en EC2 + base de datos en Amazon RDS + frontend en S3**) desde AWS CloudShell, y para eliminar todo al terminar.
