@@ -56,7 +56,7 @@ for VPC in $(aws ec2 describe-vpcs --filters Name=tag:Name,Values=miifts-vpc --q
   done
   for igw in $(aws ec2 describe-internet-gateways --filters Name=attachment.vpc-id,Values=$VPC \
       --query 'InternetGateways[].InternetGatewayId' --output text); do
-    aws ec2 detach-internet-gateway --internet-gateway-id $igw --vpc-id$VPC
+    aws ec2 detach-internet-gateway --internet-gateway-id $igw --vpc-id $VPC
     aws ec2 delete-internet-gateway --internet-gateway-id $igw
   done
   aws ec2 delete-vpc --vpc-id $VPC && echo "   VPC $VPC eliminada"
