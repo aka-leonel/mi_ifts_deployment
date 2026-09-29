@@ -55,6 +55,11 @@ Learner Lab te da credenciales **temporales** (access key, secret key, session t
 
 ## Uso
 
+### 0. Clonar repo y moverse a la carpeta.
+```bash
+git clone https://github.com/aka-leonel/mi_ifts_deployment.git
+cd mi_ifts_deployment/
+```
 ### 1. Desplegar todo
 
 ```bash
