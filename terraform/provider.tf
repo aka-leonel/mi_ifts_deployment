@@ -4,7 +4,10 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      # Fijado en 3.74.0: desde la v4.x, aws_s3_bucket hace llamadas extra
+      # (GetBucketObjectLockConfiguration, GetBucketAccelerateConfiguration)
+      # que el SCP de AWS Academy deniega explícitamente y rompen el apply.
+      version = "3.74.0"
     }
     random = {
       source  = "hashicorp/random"

@@ -120,6 +120,20 @@ export TF_VAR_db_password="otra-password"
 - **El `terraform.tfstate`** queda en `terraform/` (local, gitignoreado). Como el lab se resetea, no tiene sentido un backend remoto en S3 acá — si el lab se resetea y perdés el state, simplemente corré `destroy.sh` no va a poder limpiar nada (porque el state se perdió junto con el lab) y los recursos ya no existen de todas formas.
 - **La región** queda fija en `us-east-1`, igual que en los scripts originales.
 
+## Troubleshooting
+
+**`AccessDenied` leyendo el bucket S3 (`GetBucketObjectLockConfiguration` / `GetBucketAccelerateConfiguration`) con "explicit deny in a service control policy"**
+
+Es un problema conocido de AWS Academy (y labs similares): el SCP de la organización bloquea ciertas llamadas de lectura de configuración de S3 que el provider de AWS >= 4.x hace automáticamente al crear un bucket, aunque el `.tf` no las pida. El bucket se crea igual en AWS, pero Terraform no puede terminar de leerlo y el `apply` corta ahí.
+
+Por eso este proyecto fija el provider en `terraform/provider.tf` a la versión `3.74.0`, que no hace esas llamadas extra, y la configuración del sitio web del bucket S3 va como bloque `website { ... }` inline (así se hacía en esa versión), no como el recurso `aws_s3_bucket_website_configuration` (que recién existe desde la v4).
+
+Si te pasó esto en un intento anterior con el provider sin fijar:
+1. Si terraform llegó a crear el bucket pero no a registrarlo bien en el state, corré `terraform state list` para ver si `aws_s3_bucket.frontend` quedó ahí. Si aparece con problemas, `terraform state rm aws_s3_bucket.frontend`.
+2. Borrá el bucket huérfano si quedó en la cuenta: `aws s3 rb s3://<nombre-del-bucket> --force`.
+3. `terraform init -upgrade` (para bajar la versión 3.74.0 del provider).
+4. `terraform apply` de nuevo — los recursos que ya se crearon bien (VPC, EC2, RDS) no se vuelven a tocar, solo falta el S3.
+
 ## Por qué credenciales interactivas y no un archivo plantilla
 
 Se evaluaron dos opciones:

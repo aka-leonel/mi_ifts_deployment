@@ -9,6 +9,14 @@ resource "aws_s3_bucket" "frontend" {
   # evitando el paso manual de "aws s3 rb --force" del script original
   force_destroy = true
 
+  # En el provider 3.74.0 (ver provider.tf) la config del sitio web es un bloque
+  # inline del propio bucket, no un recurso aparte (aws_s3_bucket_website_configuration
+  # recién existe desde la v4 del provider).
+  website {
+    index_document = "index.html"
+    error_document = "index.html"
+  }
+
   tags = {
     Name = "${var.tag_name}-frontend-bucket"
   }
@@ -21,18 +29,6 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
   ignore_public_acls      = false
   block_public_policy     = false
   restrict_public_buckets = false
-}
-
-resource "aws_s3_bucket_website_configuration" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
-
-  index_document {
-    suffix = "index.html"
-  }
-
-  error_document {
-    key = "index.html"
-  }
 }
 
 resource "aws_s3_bucket_policy" "frontend" {
