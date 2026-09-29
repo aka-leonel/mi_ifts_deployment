@@ -4,7 +4,7 @@ Guía rápida para desplegar miIFTS (**backend en EC2 + base de datos en Amazon 
 
 Región usada: `us-east-1`.
 
-> Si algo falla en cualquier etapa, ejecutá `etapa_4_cleanup.sh` y empezá de nuevo desde la etapa 1.
+> Si algo falla en cualquier etapa, ejecutá `etapa_4_cleanup.sh` 2(dos) veces y empezá de nuevo desde la etapa 1.
 
 ## Requisitos
 
@@ -24,16 +24,17 @@ Región usada: `us-east-1`.
 
 3.  Le vas a dar permiso de ejecución (chmod +x) a cada script ejecutando:
    ```bash
-   bash chmod +x etapa_1_infraestructura_cloud.sh
-   bash chmod +x etapa_2_backend.sh
-   bash chmod +x etapa_3_frontend.sh   
+   chmod +x etapa_1_infraestructura_cloud.sh
+   chmod +x etapa_2_backend.sh
+   chmod +x etapa_3_frontend.sh 
+   chmod +x etapa_4_cleanup.sh  
    ```
 
 4. Ejecutá las etapas **en orden y de a una**, esperando que cada una termine antes de lanzar la siguiente (tené en cuenta que la creación de Amazon RDS en la etapa 1 puede tardar varios minutos):
    ```bash
-   bash ./etapa_1_infraestructura_cloud.sh
-   bash ./etapa_2_backend.sh
-   bash ./etapa_3_frontend.sh
+   ./etapa_1_infraestructura_cloud.sh
+   ./etapa_2_backend.sh
+   ./etapa_3_frontend.sh
    ```
 
 5. Al terminar, la etapa 3 imprime la URL de la PWA. La API queda en `http://<IP-pública>:8000` (la documentación en `/docs`).
@@ -41,7 +42,7 @@ Región usada: `us-east-1`.
 6. Liberar recursos
 > **IMPORTANTE:** para liberar recursos y no consumir tus créditos, ejecutá al finalizar:
 > ```bash
-> bash etapa_4_cleanup.sh
+> etapa_4_cleanup.sh
 > ```
 
 ## Arquitectura final desplegada
