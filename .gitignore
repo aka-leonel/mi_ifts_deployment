@@ -10,6 +10,9 @@ override.tf
 override.tf.json
 .terraform.lock.hcl
 
+# Archivos generados por Terraform (policy JSON del bucket S3)
+terraform/.generated/
+
 # Nunca versionar credenciales ni claves
 *.pem
 credentials

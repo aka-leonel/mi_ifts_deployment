@@ -2,39 +2,10 @@ resource "random_id" "bucket_suffix" {
   byte_length = 4
 }
 
-resource "aws_s3_bucket" "frontend" {
-  bucket = "${var.tag_name}-frontend-bucket-${random_id.bucket_suffix.hex}"
+locals {
+  bucket_name = "${var.tag_name}-frontend-bucket-${random_id.bucket_suffix.hex}"
 
-  # Permite que 'terraform destroy' borre el bucket aunque tenga objetos adentro,
-  # evitando el paso manual de "aws s3 rb --force" del script original
-  force_destroy = true
-
-  # En el provider 3.74.0 (ver provider.tf) la config del sitio web es un bloque
-  # inline del propio bucket, no un recurso aparte (aws_s3_bucket_website_configuration
-  # recién existe desde la v4 del provider).
-  website {
-    index_document = "index.html"
-    error_document = "index.html"
-  }
-
-  tags = {
-    Name = "${var.tag_name}-frontend-bucket"
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
-
-  block_public_acls       = false
-  ignore_public_acls      = false
-  block_public_policy     = false
-  restrict_public_buckets = false
-}
-
-resource "aws_s3_bucket_policy" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
-
-  policy = jsonencode({
+  bucket_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
@@ -42,10 +13,52 @@ resource "aws_s3_bucket_policy" "frontend" {
         Effect    = "Allow"
         Principal = "*"
         Action    = "s3:GetObject"
-        Resource  = "${aws_s3_bucket.frontend.arn}/*"
+        Resource  = "arn:aws:s3:::${local.bucket_name}/*"
       }
     ]
   })
+}
 
-  depends_on = [aws_s3_bucket_public_access_block.frontend]
+# El bucket policy se escribe a un archivo local para pasárselo a "aws s3api
+# put-bucket-policy" sin pelearse con el escapado de comillas dentro de un
+# heredoc de shell.
+resource "local_file" "bucket_policy" {
+  filename = "${path.module}/.generated/${local.bucket_name}-policy.json"
+  content  = local.bucket_policy
+}
+
+# NOTA IMPORTANTE (AWS Academy):
+# El recurso administrado "aws_s3_bucket" del provider AWS (v4+) hace llamadas
+# de lectura extra al crearse (GetBucketObjectLockConfiguration,
+# GetBucketAccelerateConfiguration, etc.) que el Service Control Policy de
+# Organizations de AWS Academy deniega explícitamente, aunque el bucket en sí
+# se cree bien. Para no depender de una versión vieja del provider (que rompe
+# el state de los demás recursos, ya creados con v5), este bucket se crea y
+# configura por fuera del ciclo normal de Terraform, con AWS CLI directamente
+# — el mismo enfoque que usaba el script original etapa_3_frontend.sh.
+resource "null_resource" "frontend_bucket" {
+  triggers = {
+    bucket_name = local.bucket_name
+    region      = var.aws_region
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      aws s3api create-bucket --bucket ${local.bucket_name} --region ${var.aws_region}
+      aws s3api put-public-access-block --bucket ${local.bucket_name} \
+        --public-access-block-configuration "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+      aws s3 website s3://${local.bucket_name}/ --index-document index.html --error-document index.html
+      aws s3api put-bucket-policy --bucket ${local.bucket_name} --policy file://${local_file.bucket_policy.filename}
+    EOT
+  }
+
+  # Al hacer "terraform destroy", borra el bucket (y su contenido) por CLI,
+  # igual que "aws s3 rb --force" en etapa_4_cleanup.sh.
+  provisioner "local-exec" {
+    when    = destroy
+    command = "aws s3 rb s3://${self.triggers.bucket_name} --force || true"
+  }
+
+  depends_on = [local_file.bucket_policy]
 }

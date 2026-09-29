@@ -32,11 +32,12 @@ output "db_password" {
 }
 
 output "bucket_name" {
-  value = aws_s3_bucket.frontend.id
+  value      = local.bucket_name
+  depends_on = [null_resource.frontend_bucket]
 }
 
 output "frontend_url" {
-  value = "http://${aws_s3_bucket.frontend.id}.s3-website-${var.aws_region}.amazonaws.com"
+  value = "http://${local.bucket_name}.s3-website-${var.aws_region}.amazonaws.com"
 }
 
 output "backend_repo_url" {

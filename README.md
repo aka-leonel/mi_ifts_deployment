@@ -10,7 +10,7 @@ Migración de los scripts `etapa_1` a `etapa_4` (Bash + AWS CLI) a Terraform, pa
 | Security Groups (backend: 80/8000, RDS: 5432 solo desde backend) | `etapa_1` (parte 2) |
 | EC2 (Ubuntu 22.04, `t3.micro`, `LabInstanceProfile`) | `etapa_1` (parte 3) |
 | RDS PostgreSQL 16 (`db.t3.micro`, privada) | `etapa_1` (parte 4) |
-| Bucket S3 con hosting estático + política pública | `etapa_3_frontend.sh` (parte de infraestructura) |
+| Bucket S3 con hosting estático + política pública (vía AWS CLI, no recurso Terraform — ver Troubleshooting) | `etapa_3_frontend.sh` (parte de infraestructura) |
 
 Lo que Terraform **no** hace (porque es despliegue de aplicación, no infraestructura) sigue en `deploy.sh`:
 - Instalar Docker y levantar el backend vía SSM (`etapa_2_backend.sh`)
@@ -126,13 +126,28 @@ export TF_VAR_db_password="otra-password"
 
 Es un problema conocido de AWS Academy (y labs similares): el SCP de la organización bloquea ciertas llamadas de lectura de configuración de S3 que el provider de AWS >= 4.x hace automáticamente al crear un bucket, aunque el `.tf` no las pida. El bucket se crea igual en AWS, pero Terraform no puede terminar de leerlo y el `apply` corta ahí.
 
-Por eso este proyecto fija el provider en `terraform/provider.tf` a la versión `3.74.0`, que no hace esas llamadas extra, y la configuración del sitio web del bucket S3 va como bloque `website { ... }` inline (así se hacía en esa versión), no como el recurso `aws_s3_bucket_website_configuration` (que recién existe desde la v4).
+**No sirve** downgradear el provider de AWS a una versión vieja (ej. 3.74.0) para evitar esto: si ya creaste EC2/RDS/VPC con el provider v5, quedan grabados en el `state` con atributos que un provider viejo no reconoce (vas a ver `Resource instance managed by newer provider version`), y terminás teniendo que destruir y recrear todo.
 
-Si te pasó esto en un intento anterior con el provider sin fijar:
-1. Si terraform llegó a crear el bucket pero no a registrarlo bien en el state, corré `terraform state list` para ver si `aws_s3_bucket.frontend` quedó ahí. Si aparece con problemas, `terraform state rm aws_s3_bucket.frontend`.
-2. Borrá el bucket huérfano si quedó en la cuenta: `aws s3 rb s3://<nombre-del-bucket> --force`.
-3. `terraform init -upgrade` (para bajar la versión 3.74.0 del provider).
-4. `terraform apply` de nuevo — los recursos que ya se crearon bien (VPC, EC2, RDS) no se vuelven a tocar, solo falta el S3.
+La solución que quedó en este proyecto: el bucket S3 del frontend **no** se crea con el recurso administrado `aws_s3_bucket` de Terraform — se crea con AWS CLI dentro de un `null_resource` (ver `s3_frontend.tf`), el mismo enfoque que usaba `etapa_3_frontend.sh` originalmente. Así se evita por completo la llamada bloqueada, y el resto de la infraestructura sigue en el provider v5 normal.
+
+Si ya intentaste bajar el provider a 3.74.0 en algún momento, volvé a fijarlo en `~> 5.0` en `provider.tf` (ya está así en este repo) y corré:
+```bash
+cd terraform
+rm -rf .terraform .terraform.lock.hcl
+terraform init -upgrade
+terraform apply
+```
+
+**`no space left on device` al instalar un provider**
+
+CloudShell tiene un límite chico de almacenamiento persistente (~1 GB en `$HOME`). Si te quedás sin espacio:
+```bash
+df -h $HOME                                  # ver espacio disponible
+rm -rf terraform/.terraform                  # cache de providers, se puede borrar y reinstala solo
+rm -f ~/terraform_*_linux_amd64.zip          # el zip de la instalación de terraform, si quedó
+rm -f terraform/terraform.tfstate.*.backup   # backups viejos de state
+```
+Si con eso no alcanza, en la consola de CloudShell: **Actions → Manage storage** para ampliar el límite.
 
 ## Por qué credenciales interactivas y no un archivo plantilla
 
