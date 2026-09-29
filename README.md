@@ -19,7 +19,7 @@ Región usada: `us-east-1`.
 
 2. Traé los scripts a CloudShell clonando la rama correspondiente (`db_rds`) de este repositorio, o subiendo los archivos con *Actions → Upload file*:
    ```bash
-   git clone -b db_rds https://github.com/aka-leonel/mi_ifts_deployment.git
+   git clone -b db_rds_feat/pausar_y_reanudar https://github.com/aka-leonel/mi_ifts_deployment.git
    cd mi_ifts_deployment
    ```
 
