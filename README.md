@@ -42,11 +42,27 @@ deploy-terraform/
 - AWS CLI (ya viene en CloudShell)
 - `npm` disponible en el entorno donde corrés `deploy.sh` (para el build del frontend)
 
-**Instalar Terraform en CloudShell**, si no lo tenés:
+**Instalar Terraform en CloudShell**, si no lo tenés — CloudShell corre sobre Amazon Linux, no Ubuntu/Debian, así que **no usa `apt`**. Dos formas:
+
+*Opción A — binario en `~/bin`, sin sudo (recomendada, persiste entre sesiones porque `$HOME` se mantiene):*
 ```bash
-curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-sudo apt update && sudo apt install terraform
+cd ~
+TF_VERSION=$(curl -s https://checkpoint-api.hashicorp.com/v1/check/terraform | grep -o '"current_version":"[^"]*"' | cut -d'"' -f4)
+curl -O https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip
+unzip -o terraform_${TF_VERSION}_linux_amd64.zip
+mkdir -p ~/bin
+mv terraform ~/bin/
+export PATH=$PATH:~/bin
+echo 'export PATH=$PATH:~/bin' >> ~/.bashrc
+terraform -version
+```
+
+*Opción B — repo yum oficial de HashiCorp (más simple, pero puede no persistir entre sesiones de CloudShell):*
+```bash
+sudo yum install -y yum-utils
+sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
+sudo yum -y install terraform
+terraform -version
 ```
 
 ## Cómo se manejan las credenciales
@@ -55,11 +71,6 @@ Learner Lab te da credenciales **temporales** (access key, secret key, session t
 
 ## Uso
 
-### 0. Clonar repo y moverse a la carpeta.
-```bash
-git clone https://github.com/aka-leonel/mi_ifts_deployment.git
-cd mi_ifts_deployment/
-```
 ### 1. Desplegar todo
 
 ```bash
