@@ -1,0 +1,10 @@
+# Copiá este archivo a terraform.tfvars (ese sí está gitignoreado) y ajustá lo que necesites.
+# terraform.tfvars NUNCA se commitea.
+
+# tag_name       = "miifts"
+# instance_type  = "t3.micro"
+# db_instance_class = "db.t3.micro"
+
+# Si querés cambiar la password de la base en vez de usar el default del script original,
+# descomentá esta línea (o mejor, exportá TF_VAR_db_password en la terminal y no la escribas acá):
+# db_password = "otra-password-mas-segura"
