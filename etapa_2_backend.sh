@@ -110,6 +110,8 @@ for i in $(seq 1 240); do
 done
 
 if [ "$STATUS" != "Success" ]; then
+  aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+  --query '[StandardOutputContent,StandardErrorContent]' --output text | tail -60
   echo "❌ El despliegue del backend falló."
   exit 1
 fi
