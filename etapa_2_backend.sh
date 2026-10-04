@@ -62,10 +62,41 @@ cat > .env <<'ENVEOF'
 DATABASE_URL=postgresql://postgres:postgrespassword@${DB_HOST}:5432/miifts
 CORS_ORIGINS=*
 ENVEOF
+git pull origin dev
 
+# Limpiar el intento anterior (usa el compose del repo, que trae db local)
+docker compose down -v --remove-orphans || true
+
+# Crear la base "miifts" en RDS si no existe
+DB_EXISTS=\$(docker run --rm -e PGPASSWORD=postgrespassword postgres:16-alpine \
+  psql -h ${DB_HOST} -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='miifts'")
+if [ "\$DB_EXISTS" != "1" ]; then
+  docker run --rm -e PGPASSWORD=postgrespassword postgres:16-alpine \
+    psql -h ${DB_HOST} -U postgres -d postgres -c "CREATE DATABASE miifts"
+fi
+
+# .env apuntando a RDS
+cat > .env <<'ENVEOF'
+DATABASE_URL=postgresql://postgres:postgrespassword@${DB_HOST}:5432/miifts
+CORS_ORIGINS=*
+ENVEOF
+
+# Compose de producción: solo la API, sin db local y sin tocar el compose del repo
+cat > docker-compose.prod.yml <<'COMPOSEEOF'
+services:
+  api:
+    build: .
+    env_file: .env
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+COMPOSEEOF
+export COMPOSE_FILE=docker-compose.prod.yml
 # IMPORTANTE: Asegúrate de que el docker-compose.yml del repositorio 
 # haya removido el servicio "db" y solo levante el servicio "api".
+
 docker compose up -d --build
+
 
 echo "Esperando a que la API responda (migraciones incluidas)..."
 UP=0
