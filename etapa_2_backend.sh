@@ -9,6 +9,17 @@ export AWS_DEFAULT_REGION=us-east-1
 export AWS_PAGER=""
 source ~/miifts-ids.sh
 
+if [ ! -f ~/miifts-secrets.sh ]; then
+  echo "❌ Falta ~/miifts-secrets.sh con los secretos (SECRET_KEY, VAPID_*, SMTP_*)."
+  exit 1
+fi
+source ~/miifts-secrets.sh
+
+if [ -z "$SECRET_KEY" ] || [ -z "$VAPID_PUBLIC_KEY" ] || [ -z "$VAPID_PRIVATE_KEY" ] || [ -z "$SMTP_USER" ] || [ -z "$SMTP_PASSWORD" ]; then
+  echo "❌ Faltan secretos en ~/miifts-secrets.sh"
+  exit 1
+fi
+
 if [ -z "$INSTANCE_ID" ] || [ -z "$DB_HOST" ]; then
   echo "❌ Faltan variables de infraestructura. Ejecuta primero etapa_1_infraestructura_cloud.sh"
   exit 1
@@ -57,13 +68,6 @@ fi
 cd backend-ifts
 git pull origin dev
 
-# Configurar .env apuntando a RDS (sin servicio local de DB)
-cat > .env <<'ENVEOF'
-DATABASE_URL=postgresql://postgres:postgrespassword@${DB_HOST}:5432/miifts
-CORS_ORIGINS=*
-ENVEOF
-git pull origin dev
-
 # Limpiar el intento anterior (usa el compose del repo, que trae db local)
 docker compose down -v --remove-orphans || true
 
@@ -75,10 +79,37 @@ if [ "\$DB_EXISTS" != "1" ]; then
     psql -h ${DB_HOST} -U postgres -d postgres -c "CREATE DATABASE miifts"
 fi
 
-# .env apuntando a RDS
+# .env completo: base de datos RDS + auth + push (VAPID) + email (SMTP)
 cat > .env <<'ENVEOF'
+# --- Base de datos ---
+# En el despliegue en AWS se usa RDS (PostgreSQL). La línea de SQLite queda
+# comentada porque una segunda DATABASE_URL pisaría a la de RDS.
 DATABASE_URL=postgresql://postgres:postgrespassword@${DB_HOST}:5432/miifts
+# DATABASE_URL=sqlite:///./miifts.db
+
 CORS_ORIGINS=*
+
+# --- Auth ---
+SECRET_KEY=${SECRET_KEY}
+ALGORITHM=HS256
+
+# --- Notificaciones push (VAPID) ---
+VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
+VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
+VAPID_CLAIMS_SUB=mailto:admin@miifts.com
+
+# --- Email (SMTP) para recuperación de contraseña ---
+# Sin SMTP_HOST no se envía nada (solo se loguea un warning, sin el token).
+# Gmail: smtp.gmail.com:587 + "contraseña de aplicación" (requiere 2FA), ~500 mails/día gratis.
+# Brevo: smtp-relay.brevo.com:587, 300 mails/día gratis.
+# Mailtrap (sandbox, no entrega a casillas reales): sandbox.smtp.mailtrap.io:2525.
+# AWS SES (a futuro): email-smtp.<region>.amazonaws.com:587 con credenciales SMTP de SES.
+SMTP_HOST=smtp-relay.brevo.com
+SMTP_PORT=587
+SMTP_USER=${SMTP_USER}
+SMTP_PASSWORD=${SMTP_PASSWORD}
+SMTP_FROM=miiftsinfo@gmail.com
+SMTP_STARTTLS=true
 ENVEOF
 
 # Compose de producción: solo la API, sin db local y sin tocar el compose del repo
