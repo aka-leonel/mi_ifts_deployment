@@ -25,6 +25,16 @@ if [ -z "$INSTANCE_ID" ] || [ -z "$DB_HOST" ]; then
   exit 1
 fi
 
+# [NUEVO] Nombre del bucket del frontend: se define acá para que el backend
+# conozca la URL pública del front (se usa en el link del mail de recuperación
+# de contraseña). La etapa 3 reutiliza BUCKET_NAME si ya existe en miifts-ids.sh,
+# y la etapa 4 lo borra por prefijo (miifts-frontend-bucket-).
+if [ -z "${BUCKET_NAME:-}" ]; then
+  BUCKET_NAME="$TAG-frontend-bucket-$(date +%s)"
+  echo "export BUCKET_NAME=\"$BUCKET_NAME\"" >> ~/miifts-ids.sh
+fi
+FRONTEND_URL="http://$BUCKET_NAME.s3-website-us-east-1.amazonaws.com"
+
 echo "=== ESPERANDO A QUE EL AGENTE SSM REGISTRE LA INSTANCIA ==="
 PING="None"
 for i in $(seq 1 40); do
@@ -88,6 +98,11 @@ DATABASE_URL=postgresql://postgres:postgrespassword@${DB_HOST}:5432/miifts
 # DATABASE_URL=sqlite:///./miifts.db
 
 CORS_ORIGINS=*
+
+# --- Link del mail de recuperación de contraseña ---
+# URL pública del front (bucket S3) + ruta de la pantalla de restablecer.
+# Sin esta variable el backend usa http://localhost:5173/reset-password.
+FRONTEND_RESET_PASSWORD_URL=${FRONTEND_URL}/reset-password
 
 # --- Auth ---
 SECRET_KEY=${SECRET_KEY}
@@ -181,4 +196,5 @@ fi
 echo "=========================================="
 echo "¡ETAPA 2 COMPLETADA!"
 echo "Backend: http://$PUBLIC_IP:8000"
+#echo "Link de recuperación de contraseña apunta a: $FRONTEND_URL/reset-password"
 echo "=========================================="
