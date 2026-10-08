@@ -2,14 +2,32 @@
 set -e
 
 # ==========================================
-# Etapa 3: Despliegue del frontend (PWA) en S3
+# Etapa 3: Compilar la PWA y publicarla en la EC2 (servida por Caddy con HTTPS)
+# El build viaja a la EC2 por un bucket S3 privado temporal + URL prefirmada.
 # ==========================================
 
 export AWS_DEFAULT_REGION=us-east-1
-source ~/miifts-ids.sh
+export AWS_PAGER=""
 
-if [ -z "$PUBLIC_IP" ]; then
-  echo "❌ No hay PUBLIC_IP. Ejecuta primero las etapas 1 y 2."
+if [ ! -f ~/miifts-ids.sh ]; then
+  echo "❌ Falta ~/miifts-ids.sh. Ejecutá primero las etapas 1 y 2."
+  exit 1
+fi
+if [ ! -f ~/miifts-secrets.sh ]; then
+  echo "❌ Falta ~/miifts-secrets.sh. Ejecutá primero: ./etapa_0_secrets.sh"
+  exit 1
+fi
+source ~/miifts-ids.sh
+source ~/miifts-secrets.sh
+
+REPO_FRONT="https://github.com/aka-leonel/frontend-miifts.git"   # ajustar si cambia
+
+if [ -z "$DOMAIN" ] || [ -z "$INSTANCE_ID" ]; then
+  echo "❌ Falta DOMAIN/INSTANCE_ID. Ejecutá primero las etapas 1 y 2."
+  exit 1
+fi
+if [ -z "$VAPID_PUBLIC_KEY" ]; then
+  echo "❌ Falta VAPID_PUBLIC_KEY en ~/miifts-secrets.sh. Ejecutá de nuevo: ./etapa_0_secrets.sh"
   exit 1
 fi
 if ! command -v npm > /dev/null 2>&1; then
@@ -17,9 +35,12 @@ if ! command -v npm > /dev/null 2>&1; then
   exit 1
 fi
 
-echo "=== 3. DESPLEGANDO EL FRONTEND EN S3 ==="
+# Los archivos temporales se borran siempre al terminar
+trap 'rm -f /tmp/remote_front.sh /tmp/ssm_front.json /tmp/dist.tar.gz' EXIT
 
-# [NUEVO] Git LFS: las imágenes (*.png) del frontend están guardadas en Git LFS.
+echo "=== 1. COMPILANDO LA PWA ==="
+
+# Git LFS: las imágenes (*.png) del frontend están guardadas en Git LFS.
 # Sin git-lfs el clone baja "punteros" de texto en vez de las imágenes y la app
 # se publica sin logo ni íconos. CloudShell no lo trae instalado.
 export PATH="$HOME/bin:$PATH"
@@ -41,67 +62,105 @@ git lfs install
 
 cd ~
 if [ ! -d "frontend-miifts" ]; then
-  git clone -b dev https://github.com/aka-leonel/frontend-miifts.git
+  git clone -b dev "$REPO_FRONT"
 fi
 cd frontend-miifts
+# El .env está versionado y este script lo reescribe: se descarta el cambio local para poder hacer pull
+git checkout -- .env 2>/dev/null || true
 git pull origin dev
 
-# [NUEVO] Descargar las imágenes reales de LFS (también arregla clones viejos
-# que hayan quedado con punteros de una ejecución anterior)
+# Descargar las imágenes reales de LFS (también arregla clones viejos con punteros)
 git lfs pull
 
-# [NUEVO] Control: si quedó algún puntero LFS en vez de una imagen, cortar acá
+# Control: si quedó algún puntero LFS en vez de una imagen, cortar acá
 # antes de publicar una app rota
 if grep -rl --include="*.png" "git-lfs.github.com/spec" src public; then
   echo "❌ Las imágenes de arriba no se descargaron de Git LFS. No se publica."
   exit 1
 fi
 
-# URL del backend con la IP de la EC2
-echo "VITE_API_URL=http://$PUBLIC_IP:8000" > .env
+# La API se consume por el mismo dominio (Caddy la reenvía en /api).
+# La clave pública VAPID se compila dentro del front: si se regeneran las claves, hay que repetir esta etapa.
+cat > .env <<EOF
+VITE_API_URL=https://$DOMAIN/api
+VITE_VAPID_PUBLIC_KEY=$VAPID_PUBLIC_KEY
+EOF
 
-# Instalar dependencias y compilar la PWA con Vite
 npm install
 npm run build
 
-# Nombre del bucket: si ya existe uno guardado (re-ejecución) se reutiliza,
-# así no quedan buckets duplicados. Se guarda ANTES de crearlo para que la limpieza lo encuentre.
+echo "=== 2. SUBIENDO dist/ A UN BUCKET PRIVADO TEMPORAL ==="
+# Si ya existe uno guardado (re-ejecución) se reutiliza. Se guarda ANTES de crearlo
+# para que la limpieza (etapa 4) lo encuentre.
 if [ -z "${BUCKET_NAME:-}" ]; then
   BUCKET_NAME="$TAG-frontend-bucket-$(date +%s)"
   echo "export BUCKET_NAME=\"$BUCKET_NAME\"" >> ~/miifts-ids.sh
 fi
-
 if ! aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
   aws s3api create-bucket --bucket "$BUCKET_NAME" --region us-east-1
 fi
 
-# Habilitar acceso público
-aws s3api put-public-access-block --bucket "$BUCKET_NAME" \
-  --public-access-block-configuration "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+tar -czf /tmp/dist.tar.gz -C dist .
+aws s3 cp /tmp/dist.tar.gz s3://$BUCKET_NAME/dist.tar.gz
+DIST_URL=$(aws s3 presign s3://$BUCKET_NAME/dist.tar.gz --expires-in 900)
 
-# Política de lectura pública para los objetos
-cat > /tmp/bucket_policy.json <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "PublicReadGetObject",
-      "Effect": "Allow",
-      "Principal": "*",
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::$BUCKET_NAME/*"
-    }
-  ]
-}
-EOF
-aws s3api put-bucket-policy --bucket "$BUCKET_NAME" --policy file:///tmp/bucket_policy.json
+echo "=== 3. PUBLICANDO EN LA EC2 ==="
+cat > /tmp/remote_front.sh <<REMOTE_EOF
+set -e
+curl -fsSL "$DIST_URL" -o /tmp/dist.tar.gz
+mkdir -p /home/ubuntu/frontend-dist
+rm -rf /home/ubuntu/frontend-dist/*
+tar -xzf /tmp/dist.tar.gz -C /home/ubuntu/frontend-dist
+rm -f /tmp/dist.tar.gz
+ls /home/ubuntu/frontend-dist | head
+REMOTE_EOF
 
-# Sitio web estático y subida de archivos
-aws s3 website s3://$BUCKET_NAME/ --index-document index.html --error-document index.html
-aws s3 sync dist/ s3://$BUCKET_NAME/
+python3 -c 'import json; print(json.dumps({"commands": [open("/tmp/remote_front.sh").read()]}))' > /tmp/ssm_front.json
+
+COMMAND_ID=$(aws ssm send-command \
+  --instance-ids "$INSTANCE_ID" \
+  --document-name "AWS-RunShellScript" \
+  --parameters file:///tmp/ssm_front.json \
+  --query "Command.CommandId" --output text)
+
+STATUS="Pending"
+for i in $(seq 1 60); do
+  STATUS=$(aws ssm get-command-invocation \
+    --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+    --query Status --output text 2>/dev/null || echo "Pending")
+  case "$STATUS" in
+    Success|Failed|Cancelled|TimedOut) break ;;
+  esac
+  sleep 5
+done
+
+if [ "$STATUS" != "Success" ]; then
+  echo "❌ Falló la publicación del front ($STATUS)."
+  aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+    --query '[StandardOutputContent,StandardErrorContent]' --output text | tail -20
+  exit 1
+fi
+
+# El build ya está en la EC2: se borra del bucket (el bucket se elimina en la etapa 4)
+aws s3 rm s3://$BUCKET_NAME/dist.tar.gz > /dev/null || true
+
+echo "=== 4. VERIFICANDO HTTPS ==="
+CODE="000"
+for i in $(seq 1 12); do
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" https://$DOMAIN/ || true)
+  [ "$CODE" = "200" ] && break
+  echo "  ...esperando DNS/certificado ($i/12, código $CODE)"
+  sleep 10
+done
 
 echo "=================================================="
-echo "✅ ¡FRONTEND DESPLEGADO CON ÉXITO EN S3!"
-echo "URL de tu PWA:"
-echo "http://$BUCKET_NAME.s3-website-us-east-1.amazonaws.com"
+if [ "$CODE" = "200" ]; then
+  echo "✅ ¡FRONTEND DESPLEGADO CON ÉXITO!"
+else
+  echo "⚠️  Front publicado, pero https://$DOMAIN/ aún no responde 200 (código $CODE)."
+  echo "   Puede faltar que se propague el DNS o que Caddy termine de emitir el certificado:"
+  echo "   probá de nuevo en unos minutos."
+fi
+echo "PWA: https://$DOMAIN"
+echo "API: https://$DOMAIN/api/"
 echo "=================================================="

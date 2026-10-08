@@ -42,10 +42,28 @@ if [ -n "$IDS" ]; then
   aws ec2 wait instance-terminated --instance-ids $IDS
 fi
 
+echo "=== 4b. DUCKDNS (se vacía el registro para que no apunte a una IP liberada) ==="
+# Mejor esfuerzo: si falla, no frena la limpieza.
+if [ -f ~/miifts-secrets.sh ]; then
+  (
+    source ~/miifts-secrets.sh
+    if [ -n "$DUCKDNS_SUBDOMAIN" ] && [ -n "$DUCKDNS_TOKEN" ]; then
+      RES=$(curl -s --max-time 20 "https://www.duckdns.org/update?domains=${DUCKDNS_SUBDOMAIN}&token=${DUCKDNS_TOKEN}&clear=true" || true)
+      echo "   DuckDNS respondió: ${RES:-sin respuesta}"
+    fi
+  ) || true
+fi
+
+echo "=== 4c. ELASTIC IPs (cobran si quedan sin asociar) ==="
+for a in $(aws ec2 describe-addresses --filters Name=tag:Name,Values=miifts-eip \
+    --query 'Addresses[].AllocationId' --output text); do
+  aws ec2 release-address --allocation-id $a && echo "EIP $a liberada"
+done
+
 echo "=== 5. RED (VPCs y componentes) ==="
 for VPC in $(aws ec2 describe-vpcs --filters Name=tag:Name,Values=miifts-vpc --query 'Vpcs[].VpcId' --output text); do
   echo "-- Limpiando VPC $VPC"
-  
+
   for sg in $(aws ec2 describe-security-groups --filters Name=vpc-id,Values=$VPC \
       --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text); do
     for i in 1 2 3 4 5 6; do
@@ -53,24 +71,24 @@ for VPC in $(aws ec2 describe-vpcs --filters Name=tag:Name,Values=miifts-vpc --q
       sleep 10
     done
   done
-  
+
   for s in $(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC --query 'Subnets[].SubnetId' --output text); do
     aws ec2 delete-subnet --subnet-id $s
   done
-  
+
   for rt in $(aws ec2 describe-route-tables --filters Name=vpc-id,Values=$VPC \
       --query 'RouteTables[?length(Associations[?Main==`true`])==`0`].RouteTableId' --output text); do
     aws ec2 delete-route-table --route-table-id $rt
   done
-  
+
   for igw in $(aws ec2 describe-internet-gateways --filters Name=attachment.vpc-id,Values=$VPC \
       --query 'InternetGateways[].InternetGatewayId' --output text); do
     aws ec2 detach-internet-gateway --internet-gateway-id $igw --vpc-id $VPC
     aws ec2 delete-internet-gateway --internet-gateway-id $igw
   done
-  
+
   aws ec2 delete-vpc --vpc-id $VPC && echo "   VPC $VPC eliminada"
 done
 
 rm -f ~/miifts-ids.sh
-echo "✅ Limpieza completa de arquitectura desacoplada"
+echo "✅ Limpieza completa (no se borra ~/miifts-secrets.sh)"

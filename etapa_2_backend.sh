@@ -2,38 +2,55 @@
 set -e
 
 # ==========================================
-# Etapa 2: Despliegue del backend en la EC2 (vía SSM) con RDS Externo
+# Etapa 2: Backend en la EC2 (vía SSM) + DuckDNS + Caddy con HTTPS
 # ==========================================
 
 export AWS_DEFAULT_REGION=us-east-1
 export AWS_PAGER=""
-source ~/miifts-ids.sh
 
-if [ ! -f ~/miifts-secrets.sh ]; then
-  echo "❌ Falta ~/miifts-secrets.sh con los secretos (SECRET_KEY, VAPID_*, SMTP_*)."
+if [ ! -f ~/miifts-ids.sh ]; then
+  echo "❌ Falta ~/miifts-ids.sh. Ejecutá primero la etapa 1."
   exit 1
 fi
+if [ ! -f ~/miifts-secrets.sh ]; then
+  echo "❌ Falta ~/miifts-secrets.sh. Ejecutá primero: ./etapa_0_secrets.sh"
+  exit 1
+fi
+source ~/miifts-ids.sh
 source ~/miifts-secrets.sh
 
-if [ -z "$SECRET_KEY" ] || [ -z "$VAPID_PUBLIC_KEY" ] || [ -z "$VAPID_PRIVATE_KEY" ] || [ -z "$SMTP_USER" ] || [ -z "$SMTP_PASSWORD" ]; then
-  echo "❌ Faltan secretos en ~/miifts-secrets.sh"
+REPO_BACKEND="https://github.com/aka-leonel/backend-ifts.git"   # ajustar si cambia
+
+# Valores no secretos con default (por si ~/miifts-secrets.sh viene de una versión anterior)
+SMTP_HOST="${SMTP_HOST:-smtp-relay.brevo.com}"
+SMTP_PORT="${SMTP_PORT:-587}"
+SMTP_FROM="${SMTP_FROM:-miiftsinfo@gmail.com}"
+VAPID_CLAIMS_SUB="${VAPID_CLAIMS_SUB:-mailto:admin@miifts.com}"
+
+for v in INSTANCE_ID DB_HOST PUBLIC_IP; do
+  if [ -z "${!v}" ]; then
+    echo "❌ Falta $v. Ejecutá primero la etapa 1."
+    exit 1
+  fi
+done
+for v in SECRET_KEY VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY DB_PASSWORD SMTP_USER SMTP_PASSWORD DUCKDNS_SUBDOMAIN DUCKDNS_TOKEN; do
+  if [ -z "${!v}" ]; then
+    echo "❌ Falta $v en ~/miifts-secrets.sh. Ejecutá de nuevo: ./etapa_0_secrets.sh"
+    exit 1
+  fi
+done
+
+DOMAIN="${DUCKDNS_SUBDOMAIN}.duckdns.org"
+
+echo "=== ACTUALIZANDO DUCKDNS ($DOMAIN -> $PUBLIC_IP) ==="
+RES=$(curl -s --max-time 30 "https://www.duckdns.org/update?domains=${DUCKDNS_SUBDOMAIN}&token=${DUCKDNS_TOKEN}&ip=${PUBLIC_IP}" || true)
+if [ "$RES" != "OK" ]; then
+  echo "❌ DuckDNS respondió: '${RES}' (revisá el subdominio y el token)."
   exit 1
 fi
-
-if [ -z "$INSTANCE_ID" ] || [ -z "$DB_HOST" ]; then
-  echo "❌ Faltan variables de infraestructura. Ejecuta primero etapa_1_infraestructura_cloud.sh"
-  exit 1
-fi
-
-# [NUEVO] Nombre del bucket del frontend: se define acá para que el backend
-# conozca la URL pública del front (se usa en el link del mail de recuperación
-# de contraseña). La etapa 3 reutiliza BUCKET_NAME si ya existe en miifts-ids.sh,
-# y la etapa 4 lo borra por prefijo (miifts-frontend-bucket-).
-if [ -z "${BUCKET_NAME:-}" ]; then
-  BUCKET_NAME="$TAG-frontend-bucket-$(date +%s)"
-  echo "export BUCKET_NAME=\"$BUCKET_NAME\"" >> ~/miifts-ids.sh
-fi
-FRONTEND_URL="http://$BUCKET_NAME.s3-website-us-east-1.amazonaws.com"
+# Se guarda el dominio para la etapa 3 (reemplaza el anterior si cambió el subdominio)
+sed -i '/^export DOMAIN=/d' ~/miifts-ids.sh
+echo "export DOMAIN=\"$DOMAIN\"" >> ~/miifts-ids.sh
 
 echo "=== ESPERANDO A QUE EL AGENTE SSM REGISTRE LA INSTANCIA ==="
 PING="None"
@@ -51,13 +68,16 @@ if [ "$PING" != "Online" ]; then
 fi
 
 echo "=== PREPARANDO SCRIPT REMOTO ==="
-# Generamos el script inyectando la variable DB_HOST de RDS de manera segura
+# Los archivos temporales contienen secretos: se borran siempre al terminar
+trap 'rm -f /tmp/remote_deploy.sh /tmp/ssm_params.json' EXIT
+
+# Las variables sin escapar se reemplazan acá (en CloudShell); las que llevan \ se evalúan en la EC2
 cat > /tmp/remote_deploy.sh <<REMOTE_EOF
 set -e
 export DEBIAN_FRONTEND=noninteractive
 APT="apt-get -o DPkg::Lock::Timeout=180 -y"
 
-echo "=== 1. INSTALANDO DEPENDENCIAS (DOCKER Y DOCKER COMPOSE) ==="
+echo "=== 1. INSTALANDO DEPENDENCIAS (DOCKER) ==="
 \$APT update
 \$APT install apt-transport-https ca-certificates curl gnupg lsb-release git
 
@@ -66,83 +86,53 @@ if ! command -v docker > /dev/null 2>&1; then
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
   echo "deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
   \$APT update
-  \$APT install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  \$APT install docker-ce docker-ce-cli containerd.io
   usermod -aG docker ubuntu
 fi
 
 echo "=== 2. CLONANDO Y DESPLEGANDO EL BACKEND (SOLO API) ==="
 cd /home/ubuntu
 if [ ! -d "backend-ifts" ]; then
-  git clone -b dev https://github.com/aka-leonel/backend-ifts.git
+  git clone -b dev ${REPO_BACKEND}
 fi
 cd backend-ifts
 git pull origin dev
 
-# Limpiar el intento anterior (usa el compose del repo, que trae db local)
-docker compose down -v --remove-orphans || true
-
-# Crear la base "miifts" en RDS si no existe
-DB_EXISTS=\$(docker run --rm -e PGPASSWORD=postgrespassword postgres:16-alpine \
-  psql -h ${DB_HOST} -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='miifts'")
-if [ "\$DB_EXISTS" != "1" ]; then
-  docker run --rm -e PGPASSWORD=postgrespassword postgres:16-alpine \
-    psql -h ${DB_HOST} -U postgres -d postgres -c "CREATE DATABASE miifts"
-fi
-
-# .env completo: base de datos RDS + auth + push (VAPID) + email (SMTP)
+# .env completo: base de datos RDS + auth + push (VAPID) + email (SMTP) + link de recuperación
+# (la base "miifts" ya la creó la etapa 1 junto con la instancia RDS)
 cat > .env <<'ENVEOF'
-# --- Base de datos ---
-# En el despliegue en AWS se usa RDS (PostgreSQL). La línea de SQLite queda
-# comentada porque una segunda DATABASE_URL pisaría a la de RDS.
-DATABASE_URL=postgresql://postgres:postgrespassword@${DB_HOST}:5432/miifts
-# DATABASE_URL=sqlite:///./miifts.db
-
-CORS_ORIGINS=*
-
-# --- Link del mail de recuperación de contraseña ---
-# URL pública del front (bucket S3) + ruta de la pantalla de restablecer.
-# Sin esta variable el backend usa http://localhost:5173/reset-password.
-FRONTEND_RESET_PASSWORD_URL=${FRONTEND_URL}/reset-password
+# --- Base de datos (RDS) ---
+DATABASE_URL=postgresql+psycopg2://postgres:${DB_PASSWORD}@${DB_HOST}:5432/miifts
 
 # --- Auth ---
 SECRET_KEY=${SECRET_KEY}
 ALGORITHM=HS256
+CORS_ORIGINS=https://${DOMAIN}
+PORT=8000
 
 # --- Notificaciones push (VAPID) ---
 VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
 VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
-VAPID_CLAIMS_SUB=mailto:admin@miifts.com
+VAPID_CLAIMS_SUB=${VAPID_CLAIMS_SUB}
 
 # --- Email (SMTP) para recuperación de contraseña ---
 # Sin SMTP_HOST no se envía nada (solo se loguea un warning, sin el token).
-# Gmail: smtp.gmail.com:587 + "contraseña de aplicación" (requiere 2FA), ~500 mails/día gratis.
-# Brevo: smtp-relay.brevo.com:587, 300 mails/día gratis.
-# Mailtrap (sandbox, no entrega a casillas reales): sandbox.smtp.mailtrap.io:2525.
-# AWS SES (a futuro): email-smtp.<region>.amazonaws.com:587 con credenciales SMTP de SES.
-SMTP_HOST=smtp-relay.brevo.com
-SMTP_PORT=587
+SMTP_HOST=${SMTP_HOST}
+SMTP_PORT=${SMTP_PORT}
 SMTP_USER=${SMTP_USER}
 SMTP_PASSWORD=${SMTP_PASSWORD}
-SMTP_FROM=miiftsinfo@gmail.com
+SMTP_FROM=${SMTP_FROM}
 SMTP_STARTTLS=true
+
+# --- Link del mail de recuperación de contraseña ---
+# Sin esta variable el backend usa http://localhost:5173/reset-password.
+FRONTEND_RESET_PASSWORD_URL=https://${DOMAIN}/reset-password
 ENVEOF
+chmod 600 .env
 
-# Compose de producción: solo la API, sin db local y sin tocar el compose del repo
-cat > docker-compose.prod.yml <<'COMPOSEEOF'
-services:
-  api:
-    build: .
-    env_file: .env
-    ports:
-      - "8000:8000"
-    restart: unless-stopped
-COMPOSEEOF
-export COMPOSE_FILE=docker-compose.prod.yml
-# IMPORTANTE: Asegúrate de que el docker-compose.yml del repositorio 
-# haya removido el servicio "db" y solo levante el servicio "api".
-
-docker compose up -d --build
-
+docker build -t miifts-api .
+docker rm -f miifts-api 2>/dev/null || true
+docker run -d --name miifts-api --restart unless-stopped --network host --env-file .env miifts-api
 
 echo "Esperando a que la API responda (migraciones incluidas)..."
 UP=0
@@ -153,15 +143,39 @@ for i in \$(seq 1 60); do
 done
 if [ "\$UP" != "1" ]; then
   echo "❌ La API no respondió en 5 minutos. Últimos logs:"
-  docker compose logs --tail 60 api
+  docker logs --tail 60 miifts-api
   exit 1
 fi
 
 echo "Ejecutando seed..."
-docker exec backend-ifts-api-1 python seed.py
+docker exec miifts-api python seed.py
 
-docker compose ps
-echo "=== ¡DESPLIEGUE FINALIZADO CON ÉXITO! ==="
+echo "=== 3. CADDY (HTTPS) ==="
+# Caddy obtiene y renueva solo el certificado de Let's Encrypt para el dominio.
+# /api/* se reenvía a la API (sin el prefijo /api); el resto sirve la PWA (la publica la etapa 3).
+mkdir -p /home/ubuntu/frontend-dist /home/ubuntu/caddy
+cat > /home/ubuntu/caddy/Caddyfile <<'CADDY'
+${DOMAIN} {
+  encode gzip
+  handle_path /api/* {
+    reverse_proxy localhost:8000
+  }
+  handle {
+    root * /srv
+    try_files {path} /index.html
+    file_server
+  }
+}
+CADDY
+docker rm -f caddy 2>/dev/null || true
+docker run -d --name caddy --restart unless-stopped --network host \
+  -v /home/ubuntu/caddy/Caddyfile:/etc/caddy/Caddyfile \
+  -v /home/ubuntu/frontend-dist:/srv \
+  -v caddy_data:/data \
+  caddy:2
+
+docker ps
+echo "=== ¡BACKEND DESPLEGADO CON ÉXITO! ==="
 REMOTE_EOF
 
 python3 -c 'import json; print(json.dumps({"commands": [open("/tmp/remote_deploy.sh").read()]}))' > /tmp/ssm_params.json
@@ -188,13 +202,13 @@ done
 
 if [ "$STATUS" != "Success" ]; then
   aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
-  --query '[StandardOutputContent,StandardErrorContent]' --output text | tail -60
-  echo "❌ El despliegue del backend falló."
+    --query '[StandardOutputContent,StandardErrorContent]' --output text | tail -60
+  echo "❌ El despliegue del backend falló ($STATUS)."
   exit 1
 fi
 
 echo "=========================================="
 echo "¡ETAPA 2 COMPLETADA!"
-echo "Backend: http://$PUBLIC_IP:8000"
-#echo "Link de recuperación de contraseña apunta a: $FRONTEND_URL/reset-password"
+echo "Dominio: https://$DOMAIN (la PWA se publica en la etapa 3)"
+echo "API:     https://$DOMAIN/api/"
 echo "=========================================="

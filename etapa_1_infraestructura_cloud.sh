@@ -3,22 +3,34 @@ set -e
 
 # ==========================================
 # SCRIPT DE DESPLIEGUE AUTOMATIZADO - miIFTS
-# Etapa 1: Infraestructura (VPC, IGW, Subnets, SGs, RDS, EC2)
+# Etapa 1: Infraestructura (VPC, IGW, Subnets, SGs, EC2 + Elastic IP, RDS)
 # Entorno: AWS Academy Learner Lab (us-east-1)
 # ==========================================
 
 export AWS_DEFAULT_REGION=us-east-1
+export AWS_PAGER=""
 REGION="us-east-1"
 TAG="miifts"
 IDS_FILE=~/miifts-ids.sh
+SECRETS_FILE=~/miifts-secrets.sh
 
 if [ -f "$IDS_FILE" ]; then
   echo "❌ Ya existe $IDS_FILE: hay un despliegue sin limpiar."
-  echo "   Ejecuta primero: bash etapa_4_cleanup.sh"
+  echo "   Ejecutá primero: ./etapa_4_cleanup.sh"
   exit 1
 fi
 
-trap 'echo "❌ La etapa 1 falló. Ejecuta etapa_4_cleanup.sh para eliminar lo que se haya creado."' ERR
+if [ ! -f "$SECRETS_FILE" ]; then
+  echo "❌ Falta $SECRETS_FILE. Ejecutá primero: ./etapa_0_secrets.sh"
+  exit 1
+fi
+source "$SECRETS_FILE"
+if [ -z "$DB_PASSWORD" ]; then
+  echo "❌ Falta DB_PASSWORD en $SECRETS_FILE. Ejecutá de nuevo: ./etapa_0_secrets.sh"
+  exit 1
+fi
+
+trap 'echo "❌ La etapa 1 falló. Ejecutá etapa_4_cleanup.sh para eliminar lo que se haya creado."' ERR
 
 save() { echo "export $1=\"${!1}\"" >> "$IDS_FILE"; }
 : > "$IDS_FILE"
@@ -63,15 +75,17 @@ aws ec2 associate-route-table --route-table-id $RT_PUB --subnet-id $PUB_SUBNET_1
 aws ec2 associate-route-table --route-table-id $RT_PUB --subnet-id $PUB_SUBNET_2 > /dev/null
 
 echo "=== 2. CREANDO SECURITY GROUPS ==="
-# SG para la EC2 (Backend)
+# SG para la EC2 (Backend + Caddy)
 SG_EC2_ID=$(aws ec2 create-security-group --group-name "$TAG-sg-backend" \
  --description "SG para miIFTS Backend EC2" --vpc-id $VPC_ID \
  --tag-specifications "ResourceType=security-group,Tags=[{Key=Name,Value=$TAG-sg-backend}]" \
  --query 'GroupId' --output text)
 save SG_EC2_ID
 
-aws ec2 authorize-security-group-ingress --group-id $SG_EC2_ID --protocol tcp --port 80 --cidr 0.0.0.0/0 > /dev/null
-aws ec2 authorize-security-group-ingress --group-id $SG_EC2_ID --protocol tcp --port 8000 --cidr 0.0.0.0/0 > /dev/null
+# HTTP (80, necesario para el desafío de Let's Encrypt) y HTTPS (443).
+# El puerto 8000 de la API ya NO se abre: se accede a través de Caddy (https://<dominio>/api).
+aws ec2 authorize-security-group-ingress --group-id $SG_EC2_ID --protocol tcp --port 80  --cidr 0.0.0.0/0 > /dev/null
+aws ec2 authorize-security-group-ingress --group-id $SG_EC2_ID --protocol tcp --port 443 --cidr 0.0.0.0/0 > /dev/null
 
 # SG para RDS (Base de datos)
 SG_RDS_ID=$(aws ec2 create-security-group --group-name "$TAG-sg-rds" \
@@ -102,8 +116,14 @@ save INSTANCE_ID
 echo "Esperando a que la instancia EC2 esté activa..."
 aws ec2 wait instance-running --instance-ids $INSTANCE_ID
 
-PUBLIC_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID \
- --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+echo "=== 3b. ASIGNANDO ELASTIC IP (IP fija para el dominio de DuckDNS) ==="
+ALLOC_ID=$(aws ec2 allocate-address --domain vpc \
+ --tag-specifications "ResourceType=elastic-ip,Tags=[{Key=Name,Value=$TAG-eip}]" \
+ --query 'AllocationId' --output text)
+save ALLOC_ID
+aws ec2 associate-address --instance-id $INSTANCE_ID --allocation-id $ALLOC_ID > /dev/null
+PUBLIC_IP=$(aws ec2 describe-addresses --allocation-ids $ALLOC_ID \
+ --query 'Addresses[0].PublicIp' --output text)
 save PUBLIC_IP
 
 echo "=== 4. CREANDO AMAZON RDS (POSTGRESQL) ==="
@@ -116,13 +136,15 @@ aws rds create-db-subnet-group \
 DB_INSTANCE_IDENTIFIER="$TAG-db"
 save DB_INSTANCE_IDENTIFIER
 
+# La contraseña viene de ~/miifts-secrets.sh (etapa 0) y la base "miifts" se crea junto con la instancia
 aws rds create-db-instance \
  --db-instance-identifier $DB_INSTANCE_IDENTIFIER \
  --db-instance-class db.t3.micro \
  --engine postgres \
  --engine-version 16 \
  --master-username postgres \
- --master-user-password postgrespassword \
+ --master-user-password "$DB_PASSWORD" \
+ --db-name miifts \
  --allocated-storage 20 \
  --db-subnet-group-name "$TAG-db-subnet-group" \
  --vpc-security-group-ids "$SG_RDS_ID" \
@@ -148,7 +170,7 @@ trap - ERR
 echo "=========================================="
 echo "INFRAESTRUCTURA CREADA CON ÉXITO:"
 echo "ID de Instancia EC2: $INSTANCE_ID"
-echo "IP Pública del Backend: $PUBLIC_IP"
+echo "Elastic IP del Backend: $PUBLIC_IP"
 echo "RDS Endpoint: $DB_HOST"
 echo "Variables guardadas en $IDS_FILE"
 echo "=========================================="
