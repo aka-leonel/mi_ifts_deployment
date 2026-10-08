@@ -6,6 +6,7 @@ Región usada: `us-east-1`.
 
 > Si algo falla en cualquier etapa de la 1 a la 3, ejecutá `./etapa_4_cleanup.sh` 2 (dos) veces y empezá de nuevo desde la etapa 1. La etapa 0 no hace falta repetirla: tus secretos se conservan en `~/miifts-secrets.sh`.
 
+
 ## Requisitos
 
 - Un laboratorio de AWS Academy Learner Lab iniciado (esperá a que la luz se ponga verde).
