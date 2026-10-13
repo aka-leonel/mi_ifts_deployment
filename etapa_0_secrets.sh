@@ -6,7 +6,7 @@ set -e
 #
 # Este script NO contiene ningún secreto, así que se puede subir a GitHub.
 #  - SECRET_KEY, claves VAPID y DB_PASSWORD (RDS): se generan acá, en CloudShell.
-#  - Credenciales SMTP (Brevo) y DuckDNS (subdominio + token): se piden por consola.
+#  - Credenciales SMTP (Brevo), DuckDNS (subdominio + token) y LLM_API_KEY: se piden por consola.
 # El archivo resultante vive en el home de CloudShell (fuera de cualquier repo),
 # con permisos 600. La etapa 4 (cleanup) NO lo borra, para conservar los valores
 # entre despliegues.
@@ -103,11 +103,13 @@ SMTP_PASSWORD=""
 SMTP_FROM=""
 DUCKDNS_SUBDOMAIN=""
 DUCKDNS_TOKEN=""
+LLM_API_KEY=""
 
 EXISTS=0
 CHANGED=0
 CHANGE_SMTP=0
 CHANGE_DUCK=0
+CHANGE_LLM=0
 
 if [ -f "$SECRETS_FILE" ]; then
   EXISTS=1
@@ -124,6 +126,7 @@ if [ -f "$SECRETS_FILE" ]; then
   fi
   if ask_yn "¿Ingresar de nuevo las credenciales SMTP (Brevo)?"; then CHANGE_SMTP=1; fi
   if ask_yn "¿Cambiar el subdominio o el token de DuckDNS?"; then CHANGE_DUCK=1; fi
+  if ask_yn "¿Cambiar la LLM_API_KEY?"; then CHANGE_LLM=1; fi
 fi
 
 # --- Completar lo que falte (también sirve para archivos de versiones anteriores) ---
@@ -155,8 +158,9 @@ if [ -z "$SMTP_FROM" ]; then SMTP_FROM="$DEFAULT_SMTP_FROM"; CHANGED=1; fi
 
 if [ -z "$SMTP_USER" ] || [ -z "$SMTP_PASSWORD" ]; then CHANGE_SMTP=1; fi
 if [ -z "$DUCKDNS_SUBDOMAIN" ] || [ -z "$DUCKDNS_TOKEN" ]; then CHANGE_DUCK=1; fi
+if [ -z "$LLM_API_KEY" ]; then CHANGE_LLM=1; fi
 
-if [ "$CHANGED" = "0" ] && [ "$CHANGE_SMTP" = "0" ] && [ "$CHANGE_DUCK" = "0" ]; then
+if [ "$CHANGED" = "0" ] && [ "$CHANGE_SMTP" = "0" ] && [ "$CHANGE_DUCK" = "0" ] && [ "$CHANGE_LLM" = "0" ]; then
   echo "Sin cambios: se conserva el archivo actual."
   exit 0
 fi
@@ -178,9 +182,14 @@ if [ "$CHANGE_DUCK" = "1" ]; then
   ask_secret DUCKDNS_TOKEN "Token de DuckDNS"
 fi
 
+if [ "$CHANGE_LLM" = "1" ]; then
+  echo "=== LLM ==="
+  ask_secret LLM_API_KEY "LLM_API_KEY"
+fi
+
 # --- Validaciones ---
 for v in SECRET_KEY VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_CLAIMS_SUB DB_PASSWORD \
-         SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_FROM DUCKDNS_SUBDOMAIN DUCKDNS_TOKEN; do
+         SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_FROM DUCKDNS_SUBDOMAIN DUCKDNS_TOKEN LLM_API_KEY; do
   if [ -z "${!v}" ]; then
     echo "❌ Falta $v. No se escribió el archivo."
     exit 1
@@ -197,7 +206,7 @@ umask 077
 {
   echo "# Generado por etapa_0_secrets.sh - NO subir a GitHub"
   for v in SECRET_KEY VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_CLAIMS_SUB DB_PASSWORD \
-           SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_FROM DUCKDNS_SUBDOMAIN DUCKDNS_TOKEN; do
+           SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_FROM DUCKDNS_SUBDOMAIN DUCKDNS_TOKEN LLM_API_KEY; do
     printf 'export %s=%q\n' "$v" "${!v}"
   done
 } > "$SECRETS_FILE"
@@ -207,7 +216,7 @@ chmod 600 "$SECRETS_FILE"
 (
   source "$SECRETS_FILE"
   for v in SECRET_KEY VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_CLAIMS_SUB DB_PASSWORD \
-           SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_FROM DUCKDNS_SUBDOMAIN DUCKDNS_TOKEN; do
+           SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_FROM DUCKDNS_SUBDOMAIN DUCKDNS_TOKEN LLM_API_KEY; do
     if [ -z "${!v}" ]; then
       echo "❌ $v quedó vacío en $SECRETS_FILE"
       exit 1
@@ -220,7 +229,7 @@ echo "✅ SECRETOS LISTOS en $SECRETS_FILE (permisos 600)"
 echo "Dominio configurado: https://${DUCKDNS_SUBDOMAIN}.duckdns.org"
 if [ "$EXISTS" = "1" ] && [ -f "$IDS_FILE" ]; then
   echo "Hay un despliegue activo: para aplicar cambios de SECRET_KEY, VAPID, SMTP o DuckDNS"
-  echo "volvé a ejecutar ./etapa_2_backend.sh y, si cambiaron VAPID o el dominio, ./etapa_3_frontend.sh"
+  echo "volvé a ejecutar ./etapa_2_backend.sh (también para LLM_API_KEY) y, si cambiaron VAPID o el dominio, ./etapa_3_frontend.sh"
 else
   echo "Siguiente paso: ./etapa_1_infraestructura_cloud.sh"
 fi

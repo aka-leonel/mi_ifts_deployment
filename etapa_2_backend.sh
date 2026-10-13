@@ -33,7 +33,7 @@ for v in INSTANCE_ID DB_HOST PUBLIC_IP; do
     exit 1
   fi
 done
-for v in SECRET_KEY VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY DB_PASSWORD SMTP_USER SMTP_PASSWORD DUCKDNS_SUBDOMAIN DUCKDNS_TOKEN; do
+for v in SECRET_KEY VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY DB_PASSWORD SMTP_USER SMTP_PASSWORD DUCKDNS_SUBDOMAIN DUCKDNS_TOKEN LLM_API_KEY; do
   if [ -z "${!v}" ]; then
     echo "❌ Falta $v en ~/miifts-secrets.sh. Ejecutá de nuevo: ./etapa_0_secrets.sh"
     exit 1
@@ -123,6 +123,9 @@ SMTP_USER=${SMTP_USER}
 SMTP_PASSWORD=${SMTP_PASSWORD}
 SMTP_FROM=${SMTP_FROM}
 SMTP_STARTTLS=true
+
+# --- LLM ---
+LLM_API_KEY=${LLM_API_KEY}
 
 # --- Link del mail de recuperación de contraseña ---
 # Sin esta variable el backend usa http://localhost:5173/reset-password.
