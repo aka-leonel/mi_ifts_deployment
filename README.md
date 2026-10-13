@@ -18,9 +18,9 @@ Región usada: `us-east-1`.
 
 1. Abrí CloudShell desde la consola de AWS.
 
-2. Traé los scripts a CloudShell clonando la rama `dev` (o editalo con la rama que quieras probar) de este repositorio, o subiendo los archivos con *Actions → Upload file*:
+2. Traé los scripts a CloudShell clonando la rama `deploy-http-funcionando'` (o editalo con la rama que quieras probar) de este repositorio, o subiendo los archivos con *Actions → Upload file*:
    ```bash
-   git clone -b dev https://github.com/aka-leonel/mi_ifts_deployment.git
+   git clone -b deploy-http-funcionando' https://github.com/aka-leonel/mi_ifts_deployment.git
    cd mi_ifts_deployment
    ```
 
