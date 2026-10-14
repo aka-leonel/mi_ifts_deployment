@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Para mostrar  logs de error al final de la etapaen caso que falle
+exec > >(tee -a /var/log/miifts-deploy.log) 2>&1
+
 # ==========================================
 # Etapa 2: Backend en la EC2 (vía SSM) + DuckDNS + Caddy con HTTPS
 # ==========================================
@@ -204,8 +207,14 @@ for i in $(seq 1 240); do
 done
 
 if [ "$STATUS" != "Success" ]; then
-  aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
-    --query '[StandardOutputContent,StandardErrorContent]' --output text | tail -60
+  echo "--- Final del log de la EC2 ---"
+  TAIL_ID=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
+    --document-name "AWS-RunShellScript" \
+    --parameters 'commands=["tail -60 /var/log/miifts-deploy.log"]' \
+    --query "Command.CommandId" --output text)
+  sleep 8
+  aws ssm get-command-invocation --command-id "$TAIL_ID" --instance-id "$INSTANCE_ID" \
+    --query StandardOutputContent --output text
   echo "❌ El despliegue del backend falló ($STATUS)."
   exit 1
 fi
