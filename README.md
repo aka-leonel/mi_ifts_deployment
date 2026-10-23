@@ -1,6 +1,6 @@
 # Despliegue de miIFTS en AWS Academy (Learner Lab) - RDS + dominio DuckDNS con HTTPS
 
-Guía rápida para desplegar miIFTS desde AWS CloudShell y para eliminar todo al terminar. La aplicación queda disponible en un dominio `https://<subdominio>.duckdns.org` con certificado HTTPS automático:
+Guía rápida para desplegar miIFTS desde AWS CloudShell y para eliminar todo al terminar. La aplicación queda disponible en un dominio `https://mi-ifts.duckdns.org/` con certificado HTTPS automático:
 
 - **Backend** (API) en un contenedor Docker dentro de una EC2.
 - **Caddy** (también en la EC2): emite y renueva el certificado HTTPS, sirve la PWA y reenvía `/api/*` a la API.
