@@ -1,8 +1,6 @@
 #!/bin/bash
 set -e
 
-# Para mostrar  logs de error al final de la etapaen caso que falle
-exec > >(tee -a /var/log/miifts-deploy.log) 2>&1
 
 # ==========================================
 # Etapa 2: Backend en la EC2 (vía SSM) + DuckDNS + Caddy con HTTPS
